@@ -1,0 +1,172 @@
+<Window x:Class="TeamsChannelScraper.WPF.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Teams Channel Intelligence Extractor"
+        Height="720" Width="800"
+        MinHeight="640" MinWidth="720"
+        WindowStartupLocation="CenterScreen"
+        Background="{StaticResource AppBackgroundBrush}">
+
+    <Window.Resources>
+        <Style TargetType="TextBlock" x:Key="SectionHeader">
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
+            <Setter Property="Margin" Value="0,0,0,4"/>
+        </Style>
+    </Window.Resources>
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="16">
+        <StackPanel>
+
+            <!-- ══ Header ══ -->
+            <Border Background="{StaticResource AccentBrush}" CornerRadius="6"
+                    Padding="16,12" Margin="0,0,0,12">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="Teams Channel Intelligence Extractor"
+                               Foreground="White" FontSize="18" FontWeight="SemiBold"
+                               FontFamily="Segoe UI" VerticalAlignment="Center"/>
+                    <TextBlock Text=" — TCIE" Foreground="#BBDEFB" FontSize="14"
+                               VerticalAlignment="Center"/>
+                </StackPanel>
+            </Border>
+
+            <!-- ══ Authentication ══ -->
+            <GroupBox Header="Authentication">
+                <Grid Margin="4">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="120"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <Label Grid.Row="0" Grid.Column="0" Content="Email:"/>
+                    <TextBox Grid.Row="0" Grid.Column="1"
+                             Text="{Binding UserEmail, UpdateSourceTrigger=PropertyChanged}"
+                             ToolTip="Your Microsoft 365 email address"/>
+
+                    <Label Grid.Row="1" Grid.Column="0" Content="Password:"/>
+                    <PasswordBox Grid.Row="1" Grid.Column="1"
+                                 x:Name="PasswordBox"
+                                 PasswordChanged="PasswordBox_PasswordChanged"
+                                 ToolTip="Password is never stored — used only for this session"/>
+                </Grid>
+            </GroupBox>
+
+            <!-- ══ Channel Configuration ══ -->
+            <GroupBox Header="Channel Configuration">
+                <Grid Margin="4">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="120"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <Label Grid.Row="0" Grid.Column="0" Content="Team Name:"/>
+                    <TextBox Grid.Row="0" Grid.Column="1"
+                             Text="{Binding TeamName, UpdateSourceTrigger=PropertyChanged}"/>
+
+                    <Label Grid.Row="1" Grid.Column="0" Content="Channel Name:"/>
+                    <TextBox Grid.Row="1" Grid.Column="1"
+                             Text="{Binding ChannelName, UpdateSourceTrigger=PropertyChanged}"/>
+
+                    <Label Grid.Row="2" Grid.Column="0" Content="Max Messages:"/>
+                    <TextBox Grid.Row="2" Grid.Column="1"
+                             Text="{Binding MaxMessages, UpdateSourceTrigger=PropertyChanged}"/>
+                </Grid>
+            </GroupBox>
+
+            <!-- ══ Options ══ -->
+            <GroupBox Header="Scraping Options">
+                <StackPanel Margin="4" Orientation="Horizontal">
+                    <CheckBox Content="Include Replies" IsChecked="{Binding IncludeReplies}" Margin="0,0,24,0"/>
+                    <CheckBox Content="Headless Browser" IsChecked="{Binding UseHeadless}"
+                              ToolTip="Run browser in background without visible window"/>
+                </StackPanel>
+            </GroupBox>
+
+            <!-- ══ Export ══ -->
+            <GroupBox Header="Export">
+                <Grid Margin="4">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="120"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <Label Grid.Row="0" Grid.Column="0" Content="Output Folder:"/>
+                    <TextBox Grid.Row="0" Grid.Column="1"
+                             Text="{Binding ExportFolder, UpdateSourceTrigger=PropertyChanged}"
+                             ToolTip="Leave blank to use default: Documents\TeamsExports\{channel}\{timestamp}"/>
+                    <Button Grid.Row="0" Grid.Column="2" Content="Browse…"
+                            Command="{Binding BrowseFolderCommand}"
+                            Style="{StaticResource SecondaryButtonStyle}"
+                            Margin="6,3,0,3"/>
+
+                    <Label Grid.Row="1" Grid.Column="0" Content="Format:"/>
+                    <ComboBox Grid.Row="1" Grid.Column="1"
+                              ItemsSource="{Binding ExportFormats}"
+                              SelectedItem="{Binding ExportFormat}"
+                              Margin="0,3"/>
+                </Grid>
+            </GroupBox>
+
+            <!-- ══ Actions ══ -->
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,4">
+                <Button Content="Load Config"  Command="{Binding LoadConfigCommand}"
+                        Style="{StaticResource SecondaryButtonStyle}"/>
+                <Button Content="Save Config"  Command="{Binding SaveConfigCommand}"
+                        Style="{StaticResource SecondaryButtonStyle}"/>
+                <Button Content="Clear Logs"   Command="{Binding ClearLogsCommand}"
+                        Style="{StaticResource SecondaryButtonStyle}"/>
+                <Button Content="▶  Start Scraping"
+                        Command="{Binding StartScrapingCommand}"
+                        MinWidth="140" FontWeight="SemiBold"/>
+                <Button Content="⏹  Cancel"
+                        Command="{Binding CancelScrapingCommand}"
+                        Background="{StaticResource ErrorBrush}"
+                        Visibility="{Binding IsScraping, Converter={StaticResource BoolToVisibilityConverter}}"/>
+            </StackPanel>
+
+            <!-- ══ Progress ══ -->
+            <Border Background="{StaticResource CardBackgroundBrush}"
+                    BorderBrush="{StaticResource BorderBrush}"
+                    BorderThickness="1" CornerRadius="4" Padding="12,8" Margin="0,4">
+                <StackPanel>
+                    <TextBlock Text="{Binding StatusMessage}"
+                               Foreground="{StaticResource TextPrimaryBrush}"
+                               FontFamily="Segoe UI" FontSize="13" Margin="0,0,0,6"/>
+                    <ProgressBar Value="{Binding Progress.ProgressPercent, Mode=OneWay}"
+                                 IsIndeterminate="{Binding Progress.IsIndeterminate}"
+                                 Visibility="{Binding IsScraping, Converter={StaticResource BoolToVisibilityConverter}}"/>
+                    <TextBlock Text="{Binding Progress.CurrentActivity}"
+                               Foreground="{StaticResource TextSecondaryBrush}"
+                               FontSize="11" Margin="0,4,0,0"
+                               Visibility="{Binding IsScraping, Converter={StaticResource BoolToVisibilityConverter}}"/>
+                </StackPanel>
+            </Border>
+
+            <!-- ══ Log ══ -->
+            <GroupBox Header="Activity Log" Margin="0,4,0,0">
+                <ListBox ItemsSource="{Binding Logger.Entries}"
+                         Style="{StaticResource LogListBoxStyle}"
+                         Height="160"
+                         ScrollViewer.VerticalScrollBarVisibility="Auto"
+                         VirtualizingPanel.ScrollUnit="Pixel"
+                         x:Name="LogListBox"/>
+            </GroupBox>
+
+        </StackPanel>
+    </ScrollViewer>
+</Window>

@@ -1,0 +1,45 @@
+<Window x:Class="TeamsChannelScraper.WPF.Views.ScrapingWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Scraping in Progress"
+        Height="360" Width="560"
+        ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner"
+        Background="{StaticResource AppBackgroundBrush}">
+
+    <StackPanel Margin="20">
+
+        <TextBlock Text="Scraping Teams Channel"
+                   FontFamily="Segoe UI" FontSize="16" FontWeight="SemiBold"
+                   Foreground="{StaticResource TextPrimaryBrush}"
+                   Margin="0,0,0,12"/>
+
+        <TextBlock Text="{Binding CurrentActivity}"
+                   FontFamily="Segoe UI" FontSize="13"
+                   Foreground="{StaticResource TextSecondaryBrush}"
+                   TextWrapping="Wrap" Margin="0,0,0,10"/>
+
+        <ProgressBar Value="{Binding ProgressPercent, Mode=OneWay}"
+                     IsIndeterminate="{Binding IsIndeterminate}"
+                     Height="12" Margin="0,0,0,8"/>
+
+        <TextBlock FontFamily="Segoe UI" FontSize="12"
+                   Foreground="{StaticResource TextSecondaryBrush}"
+                   Margin="0,0,0,16">
+            <Run Text="{Binding MessagesProcessed}"/>
+            <Run Text=" / "/>
+            <Run Text="{Binding TotalEstimated}"/>
+            <Run Text=" messages"/>
+        </TextBlock>
+
+        <Separator Margin="0,0,0,12"
+                   Background="{StaticResource BorderBrush}"/>
+
+        <Button Content="Cancel"
+                HorizontalAlignment="Right"
+                MinWidth="90"
+                Background="{StaticResource ErrorBrush}"
+                IsCancel="True"/>
+
+    </StackPanel>
+</Window>
