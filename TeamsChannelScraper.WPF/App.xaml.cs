@@ -29,6 +29,9 @@ public partial class App : Application
     {
         if (_scraper is not null)
         {
+            // Task.Run + Wait(timeout) is intentional here: OnExit is synchronous and
+            // cannot be awaited. The 5-second timeout prevents hanging on shutdown
+            // without blocking the UI thread during normal operation.
             var cleanupTask = Task.Run(async () =>
             {
                 await _scraper.SaveSessionAsync();

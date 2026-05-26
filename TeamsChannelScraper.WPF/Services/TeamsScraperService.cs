@@ -218,13 +218,17 @@ public sealed class TeamsScraperService : ITeamsScraper
 
     private async Task<string?> SafeGetTextAsync(ILocator parent, string selector, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         try { return await parent.Locator(selector).First.InnerTextAsync(new LocatorInnerTextOptions { Timeout = 2000 }); }
+        catch (OperationCanceledException) { throw; }
         catch { return null; }
     }
 
     private async Task<string?> SafeGetAttributeAsync(ILocator parent, string selector, string attr, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         try { return await parent.Locator(selector).First.GetAttributeAsync(attr); }
+        catch (OperationCanceledException) { throw; }
         catch { return null; }
     }
 
