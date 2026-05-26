@@ -4,6 +4,7 @@ using Newtonsoft.Json;
 using System.Globalization;
 using TeamsChannelScraper.WPF.Models;
 using TeamsChannelScraper.WPF.Utilities;
+using System.IO;
 
 namespace TeamsChannelScraper.WPF.Services;
 

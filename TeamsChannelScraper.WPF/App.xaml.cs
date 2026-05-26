@@ -2,10 +2,9 @@ using System.Windows;
 using TeamsChannelScraper.WPF.Services;
 using TeamsChannelScraper.WPF.Utilities;
 using TeamsChannelScraper.WPF.ViewModels;
-
 namespace TeamsChannelScraper.WPF;
 
-public partial class App : Application
+public partial class App : System.Windows.Application
 {
     private ITeamsScraper? _scraper;
 

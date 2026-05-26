@@ -1,4 +1,5 @@
 using Microsoft.Playwright;
+using System.IO;
 using TeamsChannelScraper.WPF.Models;
 using TeamsChannelScraper.WPF.Utilities;
 

@@ -1,6 +1,6 @@
 namespace TeamsChannelScraper.WPF.Utilities;
 
-public sealed class TeamsScraperException(string message, Exception? inner = null)
+public class TeamsScraperException(string message, Exception? inner = null)
     : Exception(message, inner);
 
 public sealed class SessionExpiredException(string message)

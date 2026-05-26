@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Windows;
 using System.Windows.Data;
 using TeamsChannelScraper.WPF.Models;
 using TeamsChannelScraper.WPF.Services;
@@ -83,7 +84,7 @@ public sealed class ResultsViewModel : ViewModelBase
         _data = data;
 
         // All ObservableCollection mutations on UI thread
-        Application.Current.Dispatcher.Invoke(() =>
+        System.Windows.Application.Current.Dispatcher.Invoke(() =>
         {
             AllThreads.Clear();
             CategoryStats.Clear();

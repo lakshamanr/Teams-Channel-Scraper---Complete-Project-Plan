@@ -1,3 +1,5 @@
+using System.IO;
+using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using Newtonsoft.Json;
@@ -63,8 +65,8 @@ public sealed class ConfigManager
     {
         var encrypted = ProtectedData.Protect(
             Encoding.UTF8.GetBytes(email),
-            entropy: null,
-            scope: DataProtectionScope.CurrentUser);
+            null,
+            DataProtectionScope.CurrentUser);
         File.WriteAllBytes(_emailPath, encrypted);
     }
 
@@ -75,8 +77,8 @@ public sealed class ConfigManager
         {
             var decrypted = ProtectedData.Unprotect(
                 File.ReadAllBytes(_emailPath),
-                entropy: null,
-                scope: DataProtectionScope.CurrentUser);
+                null,
+                DataProtectionScope.CurrentUser);
             return Encoding.UTF8.GetString(decrypted);
         }
         catch { return null; }

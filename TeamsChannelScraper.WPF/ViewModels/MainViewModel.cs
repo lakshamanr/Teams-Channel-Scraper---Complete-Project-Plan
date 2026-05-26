@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Runtime.InteropServices;
 using System.Security;
+using System.Windows;
 using System.Windows.Input;
 using TeamsChannelScraper.WPF.Models;
 using TeamsChannelScraper.WPF.Services;
@@ -57,7 +58,7 @@ public sealed class MainViewModel : ViewModelBase
         LoadConfigCommand  = new RelayCommand(ExecuteLoadConfig);
         BrowseFolderCommand = new RelayCommand(ExecuteBrowseFolder);
         ClearLogsCommand   = new RelayCommand(() =>
-            Application.Current.Dispatcher.Invoke(() => Logger.Entries.Clear()));
+            System.Windows.Application.Current.Dispatcher.Invoke(() => Logger.Entries.Clear()));
 
         Logger = LoggerService.Instance;
 
