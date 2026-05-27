@@ -32,6 +32,8 @@ public sealed class TeamsScraperService : ITeamsScraper
     // Scrollable message-container candidates (most specific first).
     private static readonly string[] PaneCandidates =
     [
+        // New Teams (v2) — confirmed from live run
+        "[data-tid=\"channel-pane-viewport\"]",
         // New Teams (v2) — most reliable data-tid values
         "[data-tid=\"chat-messages-list\"]",
         "[data-tid=\"chat-messages-container\"]",
@@ -480,71 +482,125 @@ public sealed class TeamsScraperService : ITeamsScraper
         if (string.IsNullOrWhiteSpace(config.ChannelName)) return;
 
         await Task.Delay(Random.Shared.Next(800, 1500), ct);
-        _detectedMessageSelector = null; // reset for the new channel
+        _detectedMessageSelector = null;
 
         var found = false;
 
-        // Strategy 1: new Teams — data-testid*="channel-list-item"
+        // Strategy 1 — JavaScript text search across all sidebar channel elements.
+        // Handles special characters (&, -, etc.) correctly via textContent.includes().
+        // Also scrolls the sidebar first to populate virtualised list items.
         if (!found)
         {
             try
             {
-                var loc = _page.Locator("[data-testid*='channel-list-item']")
-                               .Filter(new LocatorFilterOptions { HasText = config.ChannelName })
-                               .First;
-                await loc.WaitForAsync(new LocatorWaitForOptions { Timeout = 5000 });
-                await loc.HoverAsync();
-                await Task.Delay(Random.Shared.Next(200, 500), ct);
-                await loc.ClickAsync();
-                _logger.Log($"Channel found (data-testid): {config.ChannelName}");
-                found = true;
+                found = await _page!.EvaluateAsync<bool>("""
+                    async (channelName) => {
+                        // Selectors that identify channel list items in new / classic Teams
+                        const sidebarSelectors = [
+                            '[data-testid*="channel-list-item"]',
+                            'span[id^="title-channel-list-item-"]',
+                            '[role="treeitem"]',
+                            '[data-tid*="channel"]',
+                        ];
+
+                        // Scroll the left-rail panel to load virtualised items
+                        const rail = document.querySelector(
+                            '[data-tid="left-rail"], [data-tid="app-layout-area"], [role="navigation"]'
+                        );
+                        if (rail) {
+                            for (let i = 0; i < 20; i++) {
+                                rail.scrollTop += 300;
+                                await new Promise(r => setTimeout(r, 100));
+                            }
+                            rail.scrollTop = 0; // back to top so we find it
+                            await new Promise(r => setTimeout(r, 300));
+                        }
+
+                        for (const sel of sidebarSelectors) {
+                            const elements = Array.from(document.querySelectorAll(sel));
+                            const match = elements.find(el =>
+                                el.textContent.trim().includes(channelName)
+                            );
+                            if (match) {
+                                match.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                await new Promise(r => setTimeout(r, 400));
+                                match.click();
+                                return true;
+                            }
+                        }
+                        return false;
+                    }
+                    """, config.ChannelName);
+
+                if (found) _logger.Log($"Channel found via JS text search: {config.ChannelName}");
             }
             catch { }
         }
 
-        // Strategy 2: classic Teams — span with id prefix
+        // Strategy 2 — Teams search box: type the channel name, click the result.
+        // Works even when the channel is not visible in the sidebar.
         if (!found)
         {
             try
             {
-                var loc = _page.Locator("span[id^='title-channel-list-item-']")
-                               .Filter(new LocatorFilterOptions { HasText = config.ChannelName })
-                               .First;
-                await loc.WaitForAsync(new LocatorWaitForOptions { Timeout = 5000 });
-                await loc.ClickAsync();
-                _logger.Log($"Channel found (id prefix): {config.ChannelName}");
-                found = true;
+                var searchInput = _page!.Locator(
+                    "[data-tid='searchBoxInput'], [data-tid='topBarSearchInput'], #ms-searchux-input, input[aria-label*='Search']")
+                    .First;
+                await searchInput.WaitForAsync(new LocatorWaitForOptions { Timeout = 5000 });
+                await searchInput.ClickAsync();
+                await Task.Delay(400, ct);
+                await searchInput.FillAsync(config.ChannelName);
+                _logger.Log($"Typed channel name in search box: {config.ChannelName}");
+
+                // Wait for search results dropdown
+                await Task.Delay(2000, ct);
+
+                // Click the first result whose text contains the channel name
+                var resultClicked = await _page.EvaluateAsync<bool>("""
+                    async (channelName) => {
+                        const resultSelectors = [
+                            '[data-tid*="search-result"]',
+                            '[role="option"]',
+                            '[role="listitem"]',
+                            '[class*="result"]',
+                        ];
+                        for (const sel of resultSelectors) {
+                            const items = Array.from(document.querySelectorAll(sel));
+                            const match = items.find(el => el.textContent.trim().includes(channelName));
+                            if (match) {
+                                match.click();
+                                return true;
+                            }
+                        }
+                        return false;
+                    }
+                    """, config.ChannelName);
+
+                if (resultClicked)
+                {
+                    _logger.Log($"Channel found via search box: {config.ChannelName}");
+                    found = true;
+                }
+                else
+                {
+                    // Clear search so it doesn't interfere with the current view
+                    await searchInput.PressAsync("Escape");
+                }
             }
             catch { }
         }
 
-        // Strategy 3: ARIA treeitem by text
+        // Strategy 3 — Playwright GetByRole treeitem (handles clean ASCII names well)
         if (!found)
         {
             try
             {
-                var loc = _page.GetByRole(AriaRole.Treeitem)
-                               .Filter(new LocatorFilterOptions { HasText = config.ChannelName })
-                               .First;
-                await loc.WaitForAsync(new LocatorWaitForOptions { Timeout = 8000 });
+                var loc = _page!.GetByRole(AriaRole.Treeitem)
+                                .Filter(new LocatorFilterOptions { HasText = config.ChannelName })
+                                .First;
+                await loc.WaitForAsync(new LocatorWaitForOptions { Timeout = 6000 });
                 await loc.ClickAsync();
-                _logger.Log($"Channel found (treeitem): {config.ChannelName}");
-                found = true;
-            }
-            catch { }
-        }
-
-        // Strategy 4: any element with data-tid containing "channel" and matching text
-        if (!found)
-        {
-            try
-            {
-                var loc = _page.Locator("[data-tid*='channel']")
-                               .Filter(new LocatorFilterOptions { HasText = config.ChannelName })
-                               .First;
-                await loc.WaitForAsync(new LocatorWaitForOptions { Timeout = 5000 });
-                await loc.ClickAsync();
-                _logger.Log($"Channel found (data-tid wildcard): {config.ChannelName}");
+                _logger.Log($"Channel found via treeitem role: {config.ChannelName}");
                 found = true;
             }
             catch { }
@@ -553,7 +609,7 @@ public sealed class TeamsScraperService : ITeamsScraper
         if (found)
             await Task.Delay(Random.Shared.Next(2500, 4000), ct);
         else
-            _logger.LogWarning($"Could not navigate to '{config.ChannelName}' — using current view.");
+            _logger.LogWarning($"Could not navigate to '{config.ChannelName}' — scraping current view.");
     }
 
     // ── Human-like scrolling ───────────────────────────────────────────────
