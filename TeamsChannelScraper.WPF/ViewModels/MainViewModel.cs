@@ -116,7 +116,7 @@ public sealed class MainViewModel : ViewModelBase
             if (!IsLoggedIn)
             {
                 StatusMessage = "Authenticating...";
-                var restored = await _scraper.TryRestoreSessionAsync(token);
+                var restored = await _scraper.TryRestoreSessionAsync(UseHeadless, token);
                 if (!restored)
                 {
                     StatusMessage = "Logging in...";

@@ -7,6 +7,7 @@ namespace TeamsChannelScraper.WPF;
 public partial class App : System.Windows.Application
 {
     private ITeamsScraper? _scraper;
+    private ScrapingStateDb? _stateDb;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -14,7 +15,8 @@ public partial class App : System.Windows.Application
 
         LoggerService.Initialize();
 
-        _scraper = new TeamsScraperService(LoggerService.Instance);
+        _stateDb = new ScrapingStateDb();
+        _scraper = new TeamsScraperService(LoggerService.Instance, _stateDb);
         var parser = new MessageParserService();
         var exportService = new ExportService(LoggerService.Instance);
         var configManager = new ConfigManager();
@@ -38,6 +40,7 @@ public partial class App : System.Windows.Application
             });
             cleanupTask.Wait(TimeSpan.FromSeconds(5));
         }
+        _stateDb?.Dispose();
         base.OnExit(e);
     }
 }

@@ -10,7 +10,7 @@ public interface ITeamsScraper
         CancellationToken cancellationToken = default);
 
     Task SaveSessionAsync(CancellationToken cancellationToken = default);
-    Task<bool> TryRestoreSessionAsync(CancellationToken cancellationToken = default);
+    Task<bool> TryRestoreSessionAsync(bool headless = false, CancellationToken cancellationToken = default);
 
     Task LoginAsync(
         string email,
