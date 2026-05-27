@@ -21,17 +21,19 @@ public sealed class ConfigManager
         _emailPath  = Path.Combine(dir, "email.dat");
     }
 
-    public void SaveConfig(ScrapingConfig config)
+    public void SaveConfig(ScrapingConfig config, string exportFormatName, string exportFolder)
     {
         // Save non-sensitive fields as JSON
         var dto = new ConfigDto
         {
-            TeamName          = config.TeamName,
-            ChannelName       = config.ChannelName,
-            MaxMessages       = config.MaxMessages,
-            IncludeReplies    = config.IncludeReplies,
+            TeamName           = config.TeamName,
+            ChannelName        = config.ChannelName,
+            MaxMessages        = config.MaxMessages,
+            IncludeReplies     = config.IncludeReplies,
             IncludeAttachments = config.IncludeAttachments,
-            UseHeadlessBrowser = config.UseHeadlessBrowser
+            UseHeadlessBrowser = config.UseHeadlessBrowser,
+            ExportFormatName   = exportFormatName,
+            ExportFolder       = exportFolder
         };
         File.WriteAllText(_configPath, JsonConvert.SerializeObject(dto, Formatting.Indented));
 
@@ -40,15 +42,15 @@ public sealed class ConfigManager
             SaveEmail(config.UserEmail);
     }
 
-    public ScrapingConfig LoadConfig()
+    public (ScrapingConfig Config, string ExportFormatName, string ExportFolder) LoadConfig()
     {
         if (!File.Exists(_configPath))
-            return new ScrapingConfig { MaxMessages = Constants.DefaultMaxMessages };
+            return (new ScrapingConfig { MaxMessages = Constants.DefaultMaxMessages }, "All", string.Empty);
 
         var dto = JsonConvert.DeserializeObject<ConfigDto>(File.ReadAllText(_configPath))
                   ?? new ConfigDto();
 
-        return new ScrapingConfig
+        var config = new ScrapingConfig
         {
             TeamName           = dto.TeamName,
             ChannelName        = dto.ChannelName,
@@ -58,6 +60,7 @@ public sealed class ConfigManager
             IncludeAttachments = dto.IncludeAttachments,
             UseHeadlessBrowser = dto.UseHeadlessBrowser
         };
+        return (config, dto.ExportFormatName, dto.ExportFolder);
     }
 
     private void SaveEmail(string email)
@@ -91,5 +94,7 @@ public sealed class ConfigManager
         public bool   IncludeReplies     { get; set; } = true;
         public bool   IncludeAttachments { get; set; } = false;
         public bool   UseHeadlessBrowser { get; set; } = false;
+        public string ExportFormatName   { get; set; } = "All";
+        public string ExportFolder       { get; set; } = string.Empty;
     }
 }

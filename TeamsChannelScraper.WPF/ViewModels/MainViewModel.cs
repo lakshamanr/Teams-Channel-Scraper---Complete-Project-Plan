@@ -207,19 +207,22 @@ public sealed class MainViewModel : ViewModelBase
 
     private void ExecuteSaveConfig()
     {
-        _configManager.SaveConfig(BuildConfig());
+        _configManager.SaveConfig(BuildConfig(), ExportFormat.ToString(), ExportFolder);
         Logger.Log("Configuration saved.");
     }
 
     private void ExecuteLoadConfig()
     {
-        var cfg = _configManager.LoadConfig();
-        TeamName    = cfg.TeamName;
-        ChannelName = cfg.ChannelName;
-        UserEmail   = cfg.UserEmail;
-        MaxMessages = cfg.MaxMessages;
+        var (cfg, exportFormatName, exportFolder) = _configManager.LoadConfig();
+        TeamName       = cfg.TeamName;
+        ChannelName    = cfg.ChannelName;
+        UserEmail      = cfg.UserEmail;
+        MaxMessages    = cfg.MaxMessages;
         IncludeReplies = cfg.IncludeReplies;
         UseHeadless    = cfg.UseHeadlessBrowser;
+        ExportFolder   = exportFolder;
+        if (Enum.TryParse<ExportFormat>(exportFormatName, out var fmt))
+            ExportFormat = fmt;
     }
 
     private void ExecuteBrowseFolder()
