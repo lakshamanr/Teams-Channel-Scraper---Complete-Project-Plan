@@ -16,15 +16,16 @@ public static class Constants
     public const int MaxRetryAttempts    = 3;
     public const int RetryBaseDelayMs    = 500;
 
-    // Teams DOM selectors (volatile — update when Teams HTML changes)
-    public const string MessageContainerSelector = "[role='article']";
-    public const string MessageIdAttribute       = "data-message-id";
-    public const string ReplyToAttribute         = "data-reply-to";
-    public const string AuthorSelector           = "[data-testid='message-author']";
-    public const string AuthorFallbackSelector   = ".author-name";
+    // Teams DOM selectors — new Teams (v2) takes priority; classic Teams fallbacks follow
+    public const string TeamsBaseUrl             = "https://teams.microsoft.com/v2/";
+    public const string MessageContainerSelector = "[data-tid='message-pane-list-item'], [data-tid='chat-pane-message'], [role='listitem'][data-mid], [role='article']";
+    public const string MessageIdAttribute       = "data-mid";            // new Teams; fall back to data-message-id
+    public const string ReplyToAttribute         = "data-reply-chain-id"; // new Teams; fall back to data-reply-to
+    public const string AuthorSelector           = "[data-tid*='author'], [data-tid='message-author-name']";
+    public const string AuthorFallbackSelector   = "[data-testid='message-author'], .author-name";
     public const string TimestampSelector        = "time[datetime]";
-    public const string ContentSelector          = "[data-testid='message-body']";
-    public const string ContentFallbackSelector  = ".message-body";
+    public const string ContentSelector          = "[data-tid='message-body'], [data-tid*='message-body']";
+    public const string ContentFallbackSelector  = "[data-testid='message-body'], .message-body";
 
     // Category keywords (lowercase for case-insensitive matching)
     public static readonly string[] DatabaseKeywords    = ["sql", "database", "db", "query", "schema", "migration", "connection pool", "entity framework", "orm"];
