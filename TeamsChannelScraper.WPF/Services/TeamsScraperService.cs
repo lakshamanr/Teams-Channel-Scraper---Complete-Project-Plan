@@ -18,6 +18,19 @@ public sealed class TeamsScraperService : ITeamsScraper
     // JS snippet that resolves the Teams message-pane element (embeds safely in template strings)
     private const string GetPaneJs = "document.querySelector('[data-tid=\"message-pane\"]')";
 
+    // Candidate selectors for the Teams scrollable message container (tried in order)
+    private static readonly string[] PaneCandidates =
+    [
+        "[data-tid='message-pane']",           // classic Teams
+        "[data-tid='messageList']",            // some classic versions
+        "[role='log']",                        // new Teams fallback
+        "#message-list",                       // new Teams
+        ".fui-ChatMessageList",                // Fluent UI new Teams
+        "[data-testid='message-list']",        // test-id based
+        ".ts-message-list-content",            // Teams internal
+        "[aria-label='Conversation']",         // aria-label based
+    ];
+
     public TeamsScraperService(LoggerService logger, ScrapingStateDb db)
     {
         _logger = logger;
@@ -90,34 +103,61 @@ public sealed class TeamsScraperService : ITeamsScraper
 
         try
         {
+            _logger.Log("Navigating to Teams...");
+            // Navigate to Teams — it will redirect to login.microsoftonline.com
             await _page.GotoAsync("https://teams.microsoft.com",
                 new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded });
 
-            // Type email with human-like key-by-key delay
-            await _page.Locator("input#i0116").WaitForAsync(new LocatorWaitForOptions { Timeout = 15000 });
-            await HumanTypeAsync(_page.Locator("input#i0116"), email, cancellationToken);
-            await Task.Delay(Random.Shared.Next(300, 700), cancellationToken);
-            await _page.Locator("input[type=submit]").ClickAsync();
+            // Wait for the Microsoft login redirect to complete
+            _logger.Log("Waiting for Microsoft login page...");
+            await _page.WaitForURLAsync(
+                url => url.Contains("login.microsoftonline.com") || url.Contains("login.microsoft.com"),
+                new PageWaitForURLOptions { Timeout = 30000 });
+            _logger.Log($"Login page loaded: {_page.Url}");
 
-            // Type password
-            await _page.Locator("input#i0118").WaitForAsync(new LocatorWaitForOptions { Timeout = 15000 });
-            await HumanTypeAsync(_page.Locator("input#i0118"), password, cancellationToken);
-            await Task.Delay(Random.Shared.Next(300, 700), cancellationToken);
-            await _page.Locator("input[type=submit]").ClickAsync();
+            // ── Email step ──────────────────────────────────────────────
+            _logger.Log("Filling email...");
+            var emailInput = _page.Locator("input[type='email'], input#i0116").First;
+            await emailInput.WaitForAsync(new LocatorWaitForOptions { Timeout = 15000 });
+            await emailInput.ClickAsync();
+            await emailInput.FillAsync(email);
+            await Task.Delay(Random.Shared.Next(400, 800), cancellationToken);
 
-            // "Stay signed in?" prompt — click No
+            var nextBtn = _page.Locator("input[type='submit'], button[type='submit']").First;
+            await nextBtn.ClickAsync();
+            _logger.Log("Email submitted — waiting for password field...");
+
+            // ── Password step ───────────────────────────────────────────
+            var passwordInput = _page.Locator("input[type='password'], input#i0118").First;
+            await passwordInput.WaitForAsync(new LocatorWaitForOptions { Timeout = 15000 });
+            await passwordInput.ClickAsync();
+            await passwordInput.FillAsync(password);
+            await Task.Delay(Random.Shared.Next(400, 800), cancellationToken);
+
+            var signInBtn = _page.Locator("input[type='submit'], button[type='submit']").First;
+            await signInBtn.ClickAsync();
+            _logger.Log("Password submitted — waiting for Teams to load...");
+
+            // ── "Stay signed in?" prompt (optional) ────────────────────
             try
             {
                 var staySignedIn = _page.Locator("input#idBtn_Back");
                 await staySignedIn.WaitForAsync(new LocatorWaitForOptions { Timeout = 5000 });
                 await staySignedIn.ClickAsync();
+                _logger.Log("Dismissed 'Stay signed in' prompt.");
             }
             catch { /* prompt not shown — continue */ }
 
-            await _page.WaitForLoadStateAsync(LoadState.NetworkIdle);
-            _logger.Log("Login successful.");
+            // Wait for Teams app to finish loading (URL changes away from login)
+            await _page.WaitForURLAsync(
+                url => !url.Contains("login.microsoftonline.com") && !url.Contains("login.microsoft.com"),
+                new PageWaitForURLOptions { Timeout = 45000 });
+
+            _logger.Log($"Teams loaded. Current URL: {_page.Url}");
+            await Task.Delay(2000, cancellationToken); // let the SPA finish rendering
 
             await SaveSessionAsync(cancellationToken);
+            _logger.Log("Login successful. Session saved.");
         }
         catch (PlaywrightException ex)
         {
@@ -131,7 +171,6 @@ public sealed class TeamsScraperService : ITeamsScraper
         CancellationToken cancellationToken = default)
     {
         var messages = new List<TeamMessage>();
-        // In-memory set for fast within-session dedup; SQLite handles cross-session dedup
         var seenIds  = new HashSet<string>();
 
         try
@@ -139,15 +178,19 @@ public sealed class TeamsScraperService : ITeamsScraper
             if (_page is null)
                 throw new TeamsScraperException("Not authenticated. Call LoginAsync or TryRestoreSessionAsync first.");
 
-            // Step 1 — navigate to Teams homepage then click into the target channel
+            // Step 1 — navigate to the target channel
             progress.Report(new ScrapingProgressUpdate(0, config.MaxMessages, "Navigating to channel...", true));
             await NavigateToChannelAsync(config, cancellationToken);
 
-            // Step 2 — scroll all the way to the TOP of history (human-like) before collecting
-            progress.Report(new ScrapingProgressUpdate(0, config.MaxMessages, "Scrolling to top of message history...", true));
-            await ScrollToTopHumanAsync(cancellationToken);
+            // Step 2 — detect which element is the scrollable message container
+            var paneSelector = await DetectPaneSelectorAsync(cancellationToken);
+            _logger.Log($"Message pane detected: {paneSelector ?? "(none — will use page scroll)"}");
 
-            // Step 3 — scrape: collect visible messages, then scroll DOWN to reveal the next batch
+            // Step 3 — scroll all the way to the VERY TOP (oldest messages) before collecting
+            progress.Report(new ScrapingProgressUpdate(0, config.MaxMessages, "Scrolling to first message...", true));
+            await ScrollToTopHumanAsync(paneSelector, cancellationToken);
+
+            // Step 4 — collect messages, scrolling DOWN through the thread
             int noNewMessageRounds = 0;
             int previousCount     = 0;
 
@@ -157,6 +200,7 @@ public sealed class TeamsScraperService : ITeamsScraper
 
                 var articles = _page.Locator("[role='article']");
                 int count    = await articles.CountAsync();
+                _logger.Log($"Scroll pass {scroll + 1}: {count} article elements visible.");
 
                 for (int i = 0; i < count; i++)
                 {
@@ -165,7 +209,6 @@ public sealed class TeamsScraperService : ITeamsScraper
                     var msg = await ParseMessageElementAsync(el, cancellationToken);
                     if (msg is null) continue;
 
-                    // Fast in-memory check first, then persistent SQLite check
                     if (seenIds.Contains(msg.Id)) continue;
                     if (_db.IsAlreadyScraped(msg.Id, config.ChannelName)) continue;
 
@@ -189,8 +232,7 @@ public sealed class TeamsScraperService : ITeamsScraper
                 }
                 previousCount = messages.Count;
 
-                // Human-like scroll DOWN to reveal the next window of messages
-                await HumanScrollDownAsync(cancellationToken);
+                await HumanScrollDownAsync(paneSelector, cancellationToken);
             }
 
             progress.Report(new ScrapingProgressUpdate(
@@ -209,27 +251,82 @@ public sealed class TeamsScraperService : ITeamsScraper
         }
     }
 
+    // ── Pane detection ─────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Tries each known selector and returns the first one that resolves to a
+    /// scrollable element (scrollHeight > clientHeight). Falls back to null,
+    /// in which case callers use window/page scroll.
+    /// </summary>
+    private async Task<string?> DetectPaneSelectorAsync(CancellationToken ct)
+    {
+        foreach (var sel in PaneCandidates)
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                var found = await _page!.EvaluateAsync<bool>(
+                    $"() => {{ const el = document.querySelector('{sel}'); " +
+                    $"return el !== null && el.scrollHeight > el.clientHeight; }}");
+                if (found)
+                    return sel;
+            }
+            catch { /* selector syntax error or page not ready — continue */ }
+        }
+
+        // Last resort: find the deepest div that has overflow scroll/auto and contains messages
+        var dynamic = await _page!.EvaluateAsync<string?>("""
+            () => {
+                const msgs = document.querySelectorAll("[role='article']");
+                if (!msgs.length) return null;
+                let el = msgs[0].parentElement;
+                while (el && el !== document.body) {
+                    const style = window.getComputedStyle(el);
+                    if ((style.overflow === 'auto' || style.overflow === 'scroll' ||
+                         style.overflowY === 'auto' || style.overflowY === 'scroll') &&
+                        el.scrollHeight > el.clientHeight) {
+                        return el.getAttribute('data-tid') || el.id
+                            ? '[data-tid="' + el.getAttribute('data-tid') + '"]'
+                            : null;
+                    }
+                    el = el.parentElement;
+                }
+                return null;
+            }
+            """);
+
+        if (dynamic is not null)
+            _logger.Log($"Pane detected dynamically: {dynamic}");
+        else
+            _logger.LogWarning("Could not detect message pane — will use window scroll.");
+
+        return dynamic;
+    }
+
     // ── Channel navigation ─────────────────────────────────────────────────
 
     private async Task NavigateToChannelAsync(ScrapingConfig config, CancellationToken ct)
     {
+        _logger.Log("Navigating to Teams...");
         await RetryAsync(async () =>
         {
             await _page!.GotoAsync("https://teams.microsoft.com",
                 new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded });
-            await _page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+            // Give the SPA time to settle and load the channel list
+            await Task.Delay(Random.Shared.Next(2000, 3500), ct);
             return true;
         }, ct);
 
+        _logger.Log($"Teams URL: {_page!.Url}");
+
         if (string.IsNullOrWhiteSpace(config.ChannelName)) return;
 
-        // Human pause before touching the sidebar
-        await Task.Delay(Random.Shared.Next(800, 1800), ct);
+        await Task.Delay(Random.Shared.Next(800, 1500), ct);
 
         try
         {
             // Strategy 1: Teams uses span[id^="title-channel-list-item-"] for channel names
-            var channelLocator = _page!
+            var channelLocator = _page
                 .Locator("span[id^='title-channel-list-item-']")
                 .Filter(new LocatorFilterOptions { HasText = config.ChannelName })
                 .First;
@@ -237,85 +334,116 @@ public sealed class TeamsScraperService : ITeamsScraper
             bool found = false;
             try
             {
-                await channelLocator.WaitForAsync(new LocatorWaitForOptions { Timeout = 5000 });
+                await channelLocator.WaitForAsync(new LocatorWaitForOptions { Timeout = 6000 });
                 found = true;
             }
-            catch { /* fall through to strategy 2 */ }
+            catch { }
 
             if (!found)
             {
                 // Strategy 2: ARIA treeitem by display text
+                _logger.Log("Strategy 1 failed, trying ARIA treeitem...");
                 channelLocator = _page
                     .GetByRole(AriaRole.Treeitem)
                     .Filter(new LocatorFilterOptions { HasText = config.ChannelName })
                     .First;
                 await channelLocator.WaitForAsync(new LocatorWaitForOptions { Timeout = 8000 });
+                found = true;
             }
 
-            // Human-like: hover first, small pause, then click
-            await channelLocator.HoverAsync();
-            await Task.Delay(Random.Shared.Next(300, 700), ct);
-            await channelLocator.ClickAsync();
-            await _page.WaitForLoadStateAsync(LoadState.NetworkIdle);
-            await Task.Delay(Random.Shared.Next(1000, 2000), ct);
-            _logger.Log($"Navigated to channel: {config.ChannelName}");
+            if (found)
+            {
+                await channelLocator.HoverAsync();
+                await Task.Delay(Random.Shared.Next(300, 600), ct);
+                await channelLocator.ClickAsync();
+                _logger.Log($"Clicked channel: {config.ChannelName}");
+                await Task.Delay(Random.Shared.Next(1500, 2500), ct);
+            }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogWarning($"Could not auto-navigate to '{config.ChannelName}': {ex.Message}. Using current view.");
+            _logger.LogWarning($"Could not navigate to '{config.ChannelName}': {ex.Message}. Using current view.");
         }
     }
 
     // ── Human-like scrolling ───────────────────────────────────────────────
 
-    /// <summary>
-    /// Scrolls the Teams message pane UP to the oldest loaded message using randomised
-    /// increments and pauses. Teams lazily loads older history as scrollTop approaches 0,
-    /// so we slow down near the top to allow fetches to complete.
-    /// </summary>
-    private async Task ScrollToTopHumanAsync(CancellationToken ct)
+    private async Task ScrollToTopHumanAsync(string? paneSelector, CancellationToken ct)
     {
-        for (int attempt = 0; attempt < 80; attempt++)
+        _logger.Log("Scrolling to top of message history (oldest messages first)...");
+        int stuckCount = 0;
+        int lastScrollTop = int.MaxValue;
+
+        for (int attempt = 0; attempt < 100; attempt++)
         {
             ct.ThrowIfCancellationRequested();
 
-            var scrollTop = await _page!.EvaluateAsync<int>(
-                $"() => {{ const el = {GetPaneJs}; return el ? Math.floor(el.scrollTop) : -1; }}");
+            var scrollTop = await GetScrollTopAsync(paneSelector);
+            if (scrollTop <= 10) break;
 
-            if (scrollTop <= 10) break; // reached top of loaded history
+            // Detect if we're stuck (scroll position not changing)
+            if (Math.Abs(scrollTop - lastScrollTop) < 5)
+            {
+                stuckCount++;
+                if (stuckCount >= 5) break; // truly at top
+                await Task.Delay(Random.Shared.Next(800, 1500), ct); // wait for Teams to load more
+                continue;
+            }
+
+            stuckCount   = 0;
+            lastScrollTop = scrollTop;
 
             var scrollBy = Random.Shared.Next(300, 700);
-            await _page.EvaluateAsync(
-                $"() => {{ const el = {GetPaneJs}; if (el) el.scrollTop = Math.max(0, el.scrollTop - {scrollBy}); }}");
+            await ScrollByAsync(paneSelector, -scrollBy);
 
-            // Randomised delay; occasionally pause longer to let Teams fetch older messages
-            var delay = Random.Shared.Next(300, 900);
-            if (Random.Shared.Next(0, 6) == 0) delay += Random.Shared.Next(1200, 3000);
+            var delay = Random.Shared.Next(300, 800);
+            if (Random.Shared.Next(0, 7) == 0) delay += Random.Shared.Next(1000, 2500);
             await Task.Delay(delay, ct);
         }
 
-        // Final wait for Teams to finish loading the oldest batch
-        await _page!.WaitForLoadStateAsync(LoadState.NetworkIdle);
-        await Task.Delay(Random.Shared.Next(1500, 3000), ct);
-        _logger.Log("Reached top of message history — starting collection.");
+        await Task.Delay(Random.Shared.Next(2000, 3500), ct);
+        _logger.Log("Reached top — starting collection from oldest messages.");
     }
 
-    /// <summary>
-    /// Scrolls DOWN a small random amount to reveal the next window of messages,
-    /// mimicking a human reading through the thread.
-    /// </summary>
-    private async Task HumanScrollDownAsync(CancellationToken ct)
+    private async Task HumanScrollDownAsync(string? paneSelector, CancellationToken ct)
     {
         var scrollBy = Random.Shared.Next(200, 500);
-        await _page!.EvaluateAsync(
-            $"() => {{ const el = {GetPaneJs}; if (el) el.scrollTop += {scrollBy}; }}");
+        await ScrollByAsync(paneSelector, scrollBy);
 
-        await _page.WaitForLoadStateAsync(LoadState.NetworkIdle);
-
-        // Randomised human-like pause; occasionally longer (simulates reading)
         var delay = Random.Shared.Next(900, 2500);
         if (Random.Shared.Next(0, 5) == 0) delay += Random.Shared.Next(1500, 4000);
         await Task.Delay(delay, ct);
+    }
+
+    private async Task<int> GetScrollTopAsync(string? paneSelector)
+    {
+        if (paneSelector is null)
+            return await _page!.EvaluateAsync<int>("() => window.scrollY");
+
+        return await _page!.EvaluateAsync<int>(
+            $"() => {{ const el = document.querySelector('{paneSelector}'); return el ? Math.floor(el.scrollTop) : window.scrollY; }}");
+    }
+
+    private async Task ScrollByAsync(string? paneSelector, int delta)
+    {
+        if (paneSelector is null)
+        {
+            await _page!.EvaluateAsync($"() => window.scrollBy(0, {delta})");
+            return;
+        }
+
+        if (delta < 0)
+        {
+            // Scroll UP (toward oldest messages)
+            await _page!.EvaluateAsync(
+                $"() => {{ const el = document.querySelector('{paneSelector}'); if (el) el.scrollTop = Math.max(0, el.scrollTop - {Math.Abs(delta)}); else window.scrollBy(0, {delta}); }}");
+        }
+        else
+        {
+            // Scroll DOWN (reveal newer messages)
+            await _page!.EvaluateAsync(
+                $"() => {{ const el = document.querySelector('{paneSelector}'); if (el) el.scrollTop += {delta}; else window.scrollBy(0, {delta}); }}");
+        }
     }
 
     // ── Message parsing ────────────────────────────────────────────────────
@@ -330,6 +458,7 @@ public sealed class TeamsScraperService : ITeamsScraper
 
             var author = await SafeGetTextAsync(el, "[data-testid='message-author']", cancellationToken)
                       ?? await SafeGetTextAsync(el, ".author-name", cancellationToken)
+                      ?? await SafeGetTextAsync(el, "[class*='author']", cancellationToken)
                       ?? "Unknown";
 
             var timestampRaw = await SafeGetAttributeAsync(el, "time[datetime]", "datetime", cancellationToken);
@@ -338,10 +467,9 @@ public sealed class TeamsScraperService : ITeamsScraper
 
             var content = await SafeGetTextAsync(el, "[data-testid='message-body']", cancellationToken)
                        ?? await SafeGetTextAsync(el, ".message-body", cancellationToken)
+                       ?? await SafeGetTextAsync(el, "[class*='body']", cancellationToken)
                        ?? string.Empty;
 
-            // Use the stable DOM ID when present; otherwise derive a deterministic content hash
-            // so the SAME message always maps to the SAME ID across scroll passes.
             var stableId = !string.IsNullOrEmpty(domId)
                 ? domId
                 : ScrapingStateDb.ComputeContentId(author, content, timestamp);
@@ -363,19 +491,6 @@ public sealed class TeamsScraperService : ITeamsScraper
     }
 
     // ── Helpers ────────────────────────────────────────────────────────────
-
-    /// <summary>Types text one character at a time with random inter-key delays to avoid bot detection.</summary>
-    private static async Task HumanTypeAsync(ILocator locator, string text, CancellationToken ct)
-    {
-        await locator.ClickAsync();
-        foreach (var ch in text)
-        {
-            ct.ThrowIfCancellationRequested();
-            await locator.PressSequentiallyAsync(
-                ch.ToString(),
-                new LocatorPressSequentiallyOptions { Delay = Random.Shared.Next(60, 160) });
-        }
-    }
 
     private async Task<string?> SafeGetTextAsync(ILocator parent, string selector, CancellationToken cancellationToken = default)
     {
